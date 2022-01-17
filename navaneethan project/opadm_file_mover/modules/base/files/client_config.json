@@ -1,0 +1,97 @@
+{
+    "clients": [
+      {
+        "send_notification": {
+          "BOOL": true
+        },
+        "clientid": {
+          "S": "H000164"
+        },
+        "destination": {
+          "M": {
+            "path": {
+              "S": "s3://575066535343-sourcedata/users/H0001664/outgoing/"
+            },
+            "location": {
+              "S": "s3"
+            },
+            "loglocation": {
+              "S": "s3://575066535343-sourcedata/users/H0001664/incoming/log/"
+            }
+          }
+        },
+        "contact_email": {
+          "S": "ngunasek@optum.com"
+        }
+      },
+      {
+        "send_notification": {
+          "BOOL": true
+        },
+        "clientid": {
+          "S": "H642453"
+        },
+        "destination": {
+          "M": {
+            "path": {
+              "S": "s3://575066535343-sourcedata/users/H642453/outgoing/"
+            },
+            "location": {
+              "S": "s3"
+            },
+            "loglocation": {
+              "S": "s3://575066535343-sourcedata/users/H642453/incoming/log/"
+            }
+          }
+        },
+        "contact_email": {
+          "S": "rajanp@optum.com,abishekm@optum.com"
+        }
+      },
+      {
+        "send_notification": {
+          "BOOL": true
+        },
+        "clientid": {
+          "S": "H000161"
+        },
+        "destination": {
+          "M": {
+            "path": {
+              "S": "gs://navanee-aws-copy-nav/H0001661/"
+            },
+            "location": {
+              "S": "google"
+            }
+          }
+        },
+        "contact_email": {
+          "S": "ngunasek@optum.com"
+        }
+      },
+      {
+        "send_notification": {
+          "BOOL": true
+        },
+        "clientid": {
+          "S": "H000162"
+        },
+        "destination": {
+          "M": {
+            "location": {
+              "S": "sftp"
+            },
+            "sftpcredentials": {
+              "S": "/das/opadm/sftp/H000166"
+            },
+            "path": {
+              "S": "incoming/dfe/"
+            }
+          }
+        },
+        "contact_email": {
+          "S": "ngunasek@optum.com"
+        }
+      }
+    ]
+  }

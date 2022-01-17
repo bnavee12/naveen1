@@ -1,0 +1,33 @@
+#
+#apiVersion: v1
+#metadata:
+#  askId: poc            [This should be your askid, please enter 'pending' if you don't have an
+#    askid YET or 'poc' if it's unsure if it will become a real application]
+#
+#  caAgileId: poc        [This should be the CA Agile Project ID. If you do not know your caAgileId,
+#    you can use 'poc' for now. If you do NOT use Rally at all then just use 'poc'
+#    for this field. If you do use Rally to track the User Stories for your project
+#    then you can login here https://rally1.rallydev.com and navigate to your project.
+#    The URL will look something like this 'https://rally1.rallydev.com/#/119066050240d/dashboard'.
+#    The number part of the URL will be your CA Agile ID. In the example above the caAgileId is 119066050240d]
+#
+#  projectKey: com.optum.myorg.myapp:component
+#    [Unique Identifier for the Project.  Sonar and the DevOps Metrics
+#    will key off of this projectKey]
+#
+#  projectFriendlyName: MyApp-component
+#    [Product Name then a dash followed by the component name, this will be used as label in dashboards etc]
+#
+#  componentType: code  [Your Options Are: (database, code, infrastructure, config, other)]
+#
+#  targetQG: GATE_00    [Name of the SonarQube quality gate that you plan to reach this year]
+
+
+apiVersion: v1
+metadata:
+  askId: poc
+  caAgileId: poc
+  projectKey: com.optum.datafactory:das-terraform
+  projectFriendlyName: DAS-filemover-terraform
+  componentType: code
+  targetQG: GATE_00

@@ -1,0 +1,244 @@
+#!/usr/bin/env groovy
+@Library(["com.optum.ode.jenkins@master"]) _
+import groovy.transform.Field
+
+String getRepoOwnerName() {
+    return "$GIT_URL".tokenize('/')[2].split("\\.")[0]
+}
+
+static boolean isProd(String buildEnvironment) {
+    return buildEnvironment in ["dev-phi", "stg", "prd", "prod-shared"]
+}
+
+static String getBranchEnvironment(String branch) {
+    def branchToEnv = ['dev': 'dev', 'dev-phi': 'dev-phi', 'stg': 'stg', 'prd': 'prd']
+    return branchToEnv.get(branch) // returns null if the branch does not exist in the map
+}
+
+// By default, seek approval to apply except when committing to a mainline terraform branch
+@Field
+boolean seekApproval = false
+
+@Field
+boolean applyTerraform = false
+
+@Field
+boolean runSharedStage = false
+
+@Field
+String buildEnvironment
+
+@Field
+boolean is_prod = false
+
+@Field
+String deployApprovers = 'ngunasek'
+
+@Field
+String environmentsDeployed = ''
+
+@Field
+def environmentsToDeploy = []
+
+@Field
+String docker_build_flag = false
+
+pipeline {
+
+    options {
+        disableConcurrentBuilds()
+        ansiColor('xterm')
+        skipStagesAfterUnstable()
+        buildDiscarder(logRotator(numToKeepStr: '10', artifactNumToKeepStr: '2'))
+    }
+
+    environment {
+        TERRAFORM_VERSION = "0.14.10"
+        DOCKER_VERSION = "19.03.9"
+        GIT_CREDENTIALS_ID = 'GH_TOKEN_BUILD_ACCOUNT'
+        AWS_REGION = "us-east-1"
+        EMAIL_RECIPIENT = "ngunasek@optum.com"
+    }
+
+    parameters {
+        choice(
+                name: 'environments',
+                choices: ['auto', 'nonprod-shared', 'prod-shared', 'dev', 'dev-phi', 'stg', 'prd'],
+                description: 'If auto, terraform will deploy 1 or more environments, based on the branch of the deployment. Otherwise, the single specified environment will be deployed'
+        )
+        booleanParam(
+                defaultValue: false,
+                name: 'forceApply',
+                description: 'Force deployment even when not on one of the primary branches. Used for testing pipeline itself'
+        )
+        choice(
+                name: 'runShared',
+                choices: ['auto', 'false', 'true'],
+                description: 'Whether to apply shared/account-level terraform. If auto, applies for dev and dev-phi branches only'
+        )
+        string(
+            name: 'docker_build_flag', 
+            defaultValue: 'false', 
+            description: 'Whether docker build should happen?'
+        )
+        string(
+            name: 'ecr_repository_url_opadm', 
+            defaultValue: '575066535343.dkr.ecr.us-east-1.amazonaws.com/opadm-filemover', 
+            description: 'What ECR Repo OPADM Image should be built?'
+        )
+        string(
+            name: 'ecr_repository_tag_opadm', 
+            defaultValue: 'latest', 
+            description: 'What ECR Repo for OPADM tag should be pushed?'
+        )
+    }
+
+    agent {
+        node {
+            label 'docker-terraform-slave'
+        }
+    }
+
+    stages {
+        stage('Load Environment Vars') {
+            steps {
+                odeSetEnvironmentVars(this)
+            }
+        }
+
+        stage('Resolve Parameters') {
+            steps {
+                script {
+                    sh '. /etc/profile.d/jenkins.sh'
+                    def userCause = currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')
+                    env.JOB_RUNNER = userCause.userId?.find { true }
+                    deployApprovers = "ngunasek,${getRepoOwnerName()}"
+
+                    // Choose the deployment environment based on the build branch
+                    buildEnvironment = getBranchEnvironment("${env.GIT_BRANCH}")
+                    if (buildEnvironment) {
+                        print.success("Found build environment ${buildEnvironment} based on branch ${env.GIT_BRANCH}")
+                        applyTerraform = true
+                        seekApproval = false    // start with always requiring approval
+
+                    } else {
+                        // default to the dev environment if an unrecognized branch so that we can at least run terraform validate and plan
+                        buildEnvironment = 'dev'
+
+                        //if we're forcing the apply using a non-mainline branch, then seek approval
+                        if (params.forceApply) {
+                            applyTerraform = true
+                            seekApproval = false
+                        }
+                    }
+                    is_prod = isProd(buildEnvironment)
+
+                    sh 'printenv | sort'
+                }
+            }
+        }
+
+        stage('Match PR to Environment') {
+            when {
+                changeRequest()
+            }
+            steps {
+                script {
+                    // For PRs, we have slightly different logic. We choose the buildEnvironment based off the target of the PR
+                    buildEnvironment = getBranchEnvironment("${env.CHANGE_TARGET}")
+                    print.success("Using build environment ${buildEnvironment} based on branch target")
+                    is_prod = isProd(buildEnvironment)
+                    applyTerraform = params.forceApply
+                }
+            }
+        }
+
+        stage('Pre-Apply') {
+            steps {
+                script {
+                    if (params.environments == 'auto') {
+                        runSharedStage = (params.runShared == 'auto')
+                                ? (buildEnvironment in ['dev', 'dev-phi'])
+                                : Boolean.parseBoolean("${params.runShared}")
+
+                        if (runSharedStage) {
+                            String sharedEnvironment = is_prod ? 'prod-shared' : 'nonprod-shared'
+                            environmentsToDeploy.add(sharedEnvironment)
+                        }
+                        environmentsToDeploy.add(buildEnvironment)
+
+                    } else {
+                        buildEnvironment = params.environments
+                        environmentsToDeploy.add(params.environments)
+                        is_prod = isProd("${params.environments}")
+                    }
+                }
+            }
+        }
+
+        stage('Configure AWS') {
+            steps {
+                odeAuthenticateToAws isProd: is_prod, roleType: 'Owner'
+            }
+        }
+
+        stage('Terraform') {
+            when {
+                expression { environmentsToDeploy }
+            }
+            steps {
+                script {
+                    glTerraformFormat check: true,
+                            additionalFlags: [recursive: null, diff: true]
+
+                    environmentsDeployed = odeTerraformStages     buildEnvironment: buildEnvironment,
+                            terraformEnvironments: environmentsToDeploy, //REQUIRED
+                            environmentsRoot: "environments",
+                            apply: applyTerraform,
+                            seekApproval: seekApproval,
+                            deployApprovers: deployApprovers,
+                            approvalMinutesTimeout: is_prod ? 15 : 5
+                }
+            }
+        }
+
+        stage("Build Docker image and Push into ECR for OPADM")
+        {
+            when { expression { env.BRANCH_NAME == 'dev' && params.docker_build_flag == 'true'} }
+            steps
+            {
+                        sh """#!/bin/bash -l
+                        export AWS_PROFILE=saml
+                        cd environments/dev
+                        bash build.sh docker ${params.ecr_repository_url_opadm} ${params.ecr_repository_tag_opadm}
+                    """
+            }
+        }
+    }
+
+    post {
+        always {
+            deleteDir()
+            echo 'Build complete'
+        }
+        success {
+            echo 'Build Successful'
+        }
+        failure {
+            echo 'Build Failure'
+            emailext body: "Build URL: ${BUILD_URL}",
+                    subject: "$currentBuild.currentResult - $JOB_NAME",
+                    to: "${env.EMAIL_RECIPIENT}"
+        }
+        unstable {
+            echo 'Build Unstable'
+        }
+        changed {
+            echo 'Pipeline status changed'
+            emailext body: "Build URL: ${BUILD_URL}",
+                    subject: "$currentBuild.currentResult - $JOB_NAME",
+                    to: "${env.EMAIL_RECIPIENT}"
+        }
+    }
+
+}

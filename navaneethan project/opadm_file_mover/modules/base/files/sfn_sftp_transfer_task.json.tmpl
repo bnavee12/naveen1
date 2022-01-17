@@ -1,0 +1,60 @@
+{
+  "Comment": "Step function to manage execution of the ${task_definition_arn} Fargate task.",
+  "StartAt": "Execute Copy Job",
+  "States": {
+    "Execute Copy Job": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::ecs:runTask.sync",
+      "Parameters": {
+        "LaunchType": "FARGATE",
+        "Cluster": "${cluster_arn}",
+        "TaskDefinition": "${task_definition_arn}", 
+        "Overrides.$": "$.Overrides",
+        "NetworkConfiguration": {
+          "AwsvpcConfiguration": {
+            "SecurityGroups": ${security_groups},
+            "Subnets": ${subnets}
+          }
+        }
+      },
+      "Next": "Task Success",
+      "ResultPath": "$.executionResult",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.executionResult",
+          "Next": "Task Failure"
+        }
+      ]
+    },
+    "Task Failure": {
+      "Type": "Pass",
+      "Result": false,
+      "ResultPath": "$.stepResults.StepsComplete",
+      "Next": "Execute Validation Lambda"
+    },
+    "Task Success": {
+      "Type": "Pass",
+      "Result": true,
+      "ResultPath": "$.stepResults.StepsComplete",
+      "Next": "Execute Validation Lambda"
+    },
+    "Execute Validation Lambda": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${lambda_arn}",
+        "Payload": {
+          "JobId.$": "$.jobid",
+          "ClientId.$": "$.clientid",
+          "Status.$": "$.stepResults.StepsComplete",
+          "ecsname.$": "$.ecs_name",
+          "executionResult.$": "$.executionResult"
+        }
+      },
+      "End": true
+    }
+  }
+}
